@@ -1,0 +1,401 @@
+log using "hw1_q1.log", replace
+
+
+*********************************************************
+***** Log produced in Stata 14 ran in a Windows PC. *****
+*********************************************************
+
+
+****************************************************************************
+*****    					APPLIED MICROECONOMETRICS                  *****
+*****       					  PROBLEM SET 1                        *****
+*****           				   SPRING 2016                         ***** 
+****************************************************************************
+****************************************************************************
+*****																   *****
+*****   		STUDENTS: Luiz Felipe Amaral   						   *****
+*****           		  Diogo Baerlocher     						   *****
+*****           		  Renata M. Caldas     						   *****
+*****           		  Henrique Fonseca     						   *****
+*****           		  Flavius Sodre        						   *****
+*****																   *****
+****************************************************************************
+
+****************************************
+*** QUESTION 1 -  CLUSTER SIMULATION ***
+****************************************
+
+****************************************
+*** 		TABLES IN TEX?
+***			Yes: 1 , No: 0
+
+local tables 0
+****************************************
+
+clear all
+
+* DATA GENERATOR PROCESS
+
+set seed 1234
+set obs 100
+gen D_star = rnormal()
+gen eta = rnormal()
+
+gen D = 1 if D_star > 0
+replace D = 0 if D == .
+
+gen clusterid = _n
+expand 100
+
+gen eps = rnormal()
+gen y = D + eta + D*eta + eps
+
+***************************************************
+
+* TABLE 1 -- ITEMS a), b), and c).
+
+eststo: quietly reg y D
+eststo: quietly reg y D, rob
+eststo: quietly reg y D, vce(cluster clusterid)
+
+esttab, se nocon noobs mtitles("Naive" "Robust" "Cluster") title("ITEMS a), b), and c)") replace
+if `tables'==1{
+esttab using "Tex\tables\q1tab1", se nocon noobs booktabs mtitles("Naive" "Robust" "Cluster") replace
+}
+eststo clear 
+
+* ITEM d)
+
+/*
+The best error specification is that one assuming cluster's unobservable
+since, by the data generator process, eta is cluster specific. This variable 
+may be misleading when estimating the model at individual level 
+and neglecting its existence will account for more variation at individual level.
+*/
+
+* TABLE 2 -- ITEMS e) and f).
+
+collapse y D, by(clusterid)
+eststo: quietly reg y D
+eststo: quietly reg y D, rob
+eststo: quietly reg y D, vce(hc2)
+eststo: quietly reg y D, vce(hc3)
+
+esttab, se nocon noobs mtitles("Naive" "Robust" "HC2" "HC3") title("TABLE 2 -- ITEMS e) and f)") replace
+if `tables'==1{
+esttab using "Tex\tables\q1tab2", se booktabs nocon noobs mtitles("Naive" "Robust" "HC2" "HC3") replace
+}
+eststo clear
+
+***************************************************
+
+* MONTE CARLO SIMULATOR
+
+clear all
+program define dgp, rclass
+	drop _all
+	set obs 100
+	gen D_star = rnormal()
+	gen eta = rnormal()
+	gen D = 1 if D_star > 0
+	replace D = 0 if D == .
+	gen clusterid = _n
+	expand 100
+	gen eps = rnormal()
+	gen y = D + eta + D*eta + eps
+	
+	reg y D
+	test D = 1
+	return scalar naive_all = r(p)<.05
+	reg y D, vce(cluster clusterid)
+	test D = 1
+	return scalar cluster_all = r(p)<.05
+	collapse y D, by(clusterid)
+
+	reg y D
+	test D = 1
+	return scalar naive_clus = r(p) < 0.05
+	reg y D, rob
+	test D = 1
+	return scalar robust_clus = r(p) < 0.05
+	reg y D, vce(hc2)
+	test D = 1
+	return scalar h2_clus = r(p) < 0.05
+	
+end
+
+simulate naive_all = r(naive_all) cluster_all = r(cluster_all) ///
+					 naive_clus = r(naive_clus) robust_clus = r(robust_clus) ///
+					 h2_clus = r(h2_clus), reps(1000): dgp
+
+* TABLE 3 -- ITEM g).
+
+quietly estpost tabstat _all, stat(mean) columns(statistics) listwise
+
+esttab, cells("mean") nonumbers title("TABLE 3 -- ITEMS g)") replace
+if `tables'==1{
+esttab using "Tex\tables\q1tab3", cells("mean") booktabs nonumbers replace
+}
+
+* ITEM f) 
+
+/*
+The naive assumption on errors structure for individual level will reject the 
+null hypothesis that $D=1$ with probability around 80%, while the other assumptions
+that take in account cluster unobservables reject the null hypothesis only with 
+probabilities around 5%. Therefore, not using corrective measures for clustered errors
+will be misleading about the true treatment effect.
+*/
+
+
+****************************************
+*** 	QUESTION 2 - EXPERIMENTAL    ***
+****************************************
+
+*cd "C:\Users\henriqueveras\Box Sync\Economics\Spring2016\ECON590-Applied\HW\PS1"
+cd "C:\Users\dcarval2\Dropbox\Econ 590 - Applied Microeconometrics\Homeworks\hw1"
+
+insheet using "PSET1-2016.csv", clear 
+
+*a) Summarizing the data
+sum
+*The data set contains 137267 observations with information on vote turnout in 2002 elections and some other control variables. The mean age of the sample is 
+*around 60 years. 56% of the sample are female voters. The size of the household varies between 1 and 2 individuals. Only 6% of the sample is composed by newly 
+*registered voters. Around 68% of the sample in the 98 elections, whereas 51% and 53% voted in the 2000 and 2002 elections, respectively.
+
+* Test whether these variables differ on average across treatment and control.
+ttest age, by(treat_real)
+ttest female, by(treat_real)
+ttest vote00, by(treat_real)
+ttest vote98, by(treat_real)
+ttest persons, by(treat_real)
+ttest newreg, by(treat_real)
+*We cannot say that any of these variables have equal averages across treatment and control. That is, we cannot reject the null hypothesis that the difference
+*in means in both treated and control groups is equal to zero for all control variables in the data set.
+
+*Test whether control variables jointly predict treatment assignment
+reg treat_real persons vote00 vote98 newreg age female, r
+*F-test does not reject the null that at least one coefficient is equal to zero.
+
+logit treat_real persons vote00 vote98 newreg age female, r
+*Wald chi-sq. test does not reject the null that at least one coefficient is equal to zero.
+
+*b)	
+*i) Estimate the reduced-form effects of treatment on voting in 2002 using OLS
+reg vote02 treat_real persons vote00 vote98 newreg age female, r
+scalar b_1 = _b[treat_real]
+
+*ii) Estimate the first-stage regression. What is the implied F-statistic on the instrument? Is there a strong first-stage?
+reg contact treat_real persons vote00 vote98 newreg age female, r
+*F-stat is 1577.56. Based on this extreme value, we can conclude that the first stage is strong. Additionally, conditional on the control variables,
+*the correlation between the instrument and the endogenous variable is .4633491.
+scalar b_2 = _b[treat_real]
+scalar wald = b_1 / b_2
+display wald
+*The implied Wald estimator is obtained by the ratio of the reduced form and first stage coefficients. In this case its value is .02594828.
+
+*iii) Estimate the 2SLS estimates for the effects of being contacted on voting in 2002.
+ivreg2 vote02 persons vote00 vote98 newreg age female (contact=treat_real), r
+
+*Using a control function approach
+reg contact treat_real persons vote00 vote98 newreg age female,r
+predict double resid, residuals
+reg vote02 contact persons vote00 vote98 newreg age female resid, r
+*As expected, using the control function approach we have the same results as using 2SLS. 
+
+*Interpretation of the regression results:
+
+*i) The reduced-form equation gives the regression of the instrument (treatment assignment) on voter turnout in the 2002 midterm elections. The coefficient of 
+*interest is .0120231, which is statistically significant at 1%. However, the magnitude is very small.  Additionally, all control variables are statistically 
+*significant at the 1% confidence level. Therefore, we can expect low correlation between the instrument and dependent variables.
+
+*ii) In order to achieve causal results we use the treatment assignment variable as instrument for the contact variable. The first stage estimation shows a
+*positive association between the instrument (treat_real) and the endogenous variable (contact). Moreover, we can reject the null hypothesis that the model
+*has no explanatory power whatsoever.
+
+*iii) The IV regression presents the causal effect estimation of the experiment. It shows that on average, voting turnout increased by 2.6% in the treatment 
+*group with respect to the control group.
+
+***************************************************
+
+* NON-EXPERIMENTAL
+
+*******************************     Item c)     *******************************
+
+
+* Estimating simple difference in voting behavior
+
+eststo: reg vote02 contact, r
+eststo: reg vote02 contact age female vote00 vote98 persons newreg, r
+
+
+* Allowing for effects of controls to differ between groups (creating interactions)
+
+gen agecontact = age * contact
+gen femalecontact = female * contact
+gen vote00contact = vote00 * contact
+gen vote98contact = vote98 * contact
+gen personscontact = persons * contact
+gen newregcontact = newreg * contact
+
+label var agecontact "Contact * Age"
+label var femalecontact "Contact * Female"
+label var vote00contact "Contact * Voted in 2000"
+label var vote98contact "Contact * Voted in 1998"
+label var vote98contact "Contact * Household size"
+label var vote98contact "Contact * Voted in 1998"
+label var personscontact "Contact * Household size"
+label var newregcontact "Contact * Newly registered"
+
+
+eststo: reg vote02 contact age female vote00 vote98 persons newreg agecontact femalecontact vote00contact vote98contact personscontact newregcontact
+
+esttab, se nocon noobs mtitles("Baseline" "Controls" "Interactions") title("ITEM c)") replace
+{
+esttab using "q2itemc", se nocon noobs booktabs mtitles("Baseline" "Controls" "Interactions") replace
+}
+eststo clear 
+
+/*
+Given that these estimates are not experimental, there are reasons to believe 
+that they are not causal estimates. Any correlation between the contact 
+indicator and unobservables will bias the estimates. One particular concern is 
+the measurement of the contact indicator. For instance, it may be capturing 
+calls answered by answered machines, which are owned by voters with larger 
+income, who, in turn, may have different behavior that voters with lower income.
+
+Comparing the estimates in the first and the second columns, we see that the 
+effect of contact on voting behavior is not stable. The point estimate gets 
+roughly halved with the inclusion of additional controls, which indicates a 
+strong correlation between the contact variable and unobservables in the 
+baseline regression. Finally, allowing the effect of controls on voting 
+behavior to vary between those who were and were not contacted yields less 
+precise estimates for the parameter of interest, even though the interactions 
+are not significant at the usual levels.
+*/
+
+
+*******************************     Item d)     *******************************
+
+
+***   i.   ***
+
+* Estimating propensity score for probability of contact
+
+pscore contact age female vote00 vote98 persons newreg, pscore(pscore) blockid(blockid)
+
+
+
+***   ii.  ***
+
+* Epanechnikov kernel
+
+kdensity pscore
+graph save "kdensity.gph", replace
+
+
+* Epanechnikov kernel with 0.05 bandwidth
+
+kdensity pscore, bw(0.05)
+graph save "kdensity0.05.gph", replace
+
+
+* Triangle kernel
+
+kdensity pscore, tri
+graph save "kdensitytriangle.gph", replace
+
+
+* Comparing different kernels
+
+twoway (kdensity pscore) (kdensity pscore, bw(0.05))
+graph save "comp1.gph", replace
+
+twoway (kdensity pscore) (kdensity pscore, tri)
+graph save "comp2.gph", replace
+
+twoway (kdensity pscore) (kdensity pscore, bw(0.05)) (kdensity pscore, tri)
+graph save "comp3.gph", replace
+
+
+* Comparing the kernel for contacted and non-contated
+
+twoway (kdensity pscore if contact==1) (kdensity pscore if contact==0)
+graph save "compcontact.gph", replace
+
+
+/* 
+The distribution for the propensity score is bimodal, with peaks around 0.06 
+and 0.08. Comparing the different kernels for the contacted and the 
+non-contacted, there is a strong overlap in the distributions at the right 
+tail. The densities have roughly the same shape.
+*/
+
+
+
+***   iii. ***
+
+
+* Computing treatment effect using propensity score as weights
+
+eststo: reg vote02 contact [w=pscore], r
+
+
+
+***   iv.  ***
+
+
+* Computing lambda weights
+
+gen lambda = contact + (1 - contact) * ( pscore / (1 - pscore) )
+
+
+* Computing treatment effect using lambda weights
+
+eststo: reg vote02 contact [w=lambda], r
+
+esttab, se nocon noobs mtitles("P. Score" "Lambda") title("ITEM d)") replace
+{
+esttab using "q2itemdweights", se nocon noobs booktabs mtitles("Propensity Score" "Lambda") replace
+}
+eststo clear
+
+* ITEMS v AND vi
+
+local controls persons vote00 vote98 newreg age female
+pscore contact `controls', pscore(ps) blockid(block) comsup level(0.01)
+
+gen red = runiform()
+keep if red<0.1
+nnmatch vote02 contact `controls' 
+nnmatch vote02 contact ps
+
+attnd vote02 contact, pscore(ps)
+atts vote02 contact, pscore(ps) blockid(block)
+attr vote02 contact, pscore(ps)
+attk vote02 contact, pscore(ps) bootstrap
+
+/*
+All of the approaches show a positive and significant relationship, indicating 
+that being contacted increase the probability of voting. Nearest neighbor 
+approach, which compares the observations with closest propensity scores, 
+indicates an increase in 6.5% the probability of voting after the individual 
+being contacted. Stratification matching divides the common support in different
+intervals, and analyze the impact in each one of them. In our case study, 
+stratification approach indicates an increase of 6.0% on the probability of 
+voting after being contacted by the program.
+
+The two next approaches (Radius and Kernel matching) present higher probability 
+of voting (9.6% and 9.3%, respectively). The main difference between these two 
+approaches is that Radius matching impose the highest distance accepted between 
+the two propensity scores, while Kernel approach, differently from all the other
+approaches presented so far, uses a weighted average for the individuals 
+non-participants of the program to construct a control group.
+*/
+
+log close
+
+
+
+
+
